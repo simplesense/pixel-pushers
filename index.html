@@ -24,6 +24,17 @@
     top: 0;
     will-change: transform;
   }
+  .burst {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 5;
+    animation: burst 0.5s ease-out forwards;
+  }
+  @keyframes burst {
+    0% { transform: translate(-50%, -50%) scale(0.6); opacity: 1; }
+    100% { transform: translate(-50%, -50%) scale(3.2); opacity: 0; }
+  }
   #cursor {
     position: fixed;
     width: 44px;
@@ -151,7 +162,8 @@
         freq,
         phase,
         amp,
-        wob
+        wob,
+        sig
       };
     } while (usedMotion.has(sig));
     usedMotion.add(sig);
@@ -188,15 +200,12 @@
   function tick() {
     for (let i = 0; i < 30; i += 1) {
       const hsl = nextHsl();
-      const size = parseFloat(nextSize());
+      const sizeStr = nextSize();
+      const size = parseFloat(sizeStr);
       const motion = nextMotion();
       const r = size / 2;
       const pos = spawnPosition(r);
-      if (!pos) {
-        clearInterval(interval);
-        countEl.textContent = pixels.length;
-        return;
-      }
+      if (!pos) break;
 
       const div = document.createElement('div');
       div.className = 'pixel';
@@ -214,6 +223,8 @@
         start: performance.now(),
         repx: 0,
         repy: 0,
+        hsl,
+        sizeStr,
         ...motion
       });
 
@@ -221,6 +232,24 @@
       sizeEl.textContent = `${size}px`;
     }
     countEl.textContent = pixels.length;
+  }
+
+  function popPixel(p) {
+    const burst = document.createElement('div');
+    burst.className = 'burst';
+    burst.style.left = `${p.x}px`;
+    burst.style.top = `${p.y}px`;
+    burst.style.width = `${p.r * 2}px`;
+    burst.style.height = `${p.r * 2}px`;
+    burst.style.background = p.hsl;
+    app.appendChild(burst);
+    setTimeout(() => burst.remove(), 520);
+    p.el.remove();
+    used.delete(p.hsl);
+    usedSizes.delete(p.sizeStr);
+    usedMotion.delete(p.sig);
+    const i = pixels.indexOf(p);
+    if (i !== -1) pixels.splice(i, 1);
   }
 
   const grid = new Map();
@@ -316,11 +345,11 @@
       for (const p of pixels) {
         const dx = p.x - mouseX;
         const dy = p.y - mouseY;
-        const R = CURSOR_R + p.r + 90;
+        const R = CURSOR_R + p.r + 60;
         const d2 = dx * dx + dy * dy;
         if (d2 >= R * R || d2 <= 0.001) continue;
         const d = Math.sqrt(d2);
-        const force = (1 - d / R) * 700;
+        const force = (1 - d / R) * 400;
         p.repx += (dx / d) * force;
         p.repy += (dy / d) * force;
       }
@@ -378,22 +407,6 @@
       for (const p of pixels) {
         p.x = Math.max(p.r, Math.min(vw - p.r, p.x));
         p.y = Math.max(p.r, Math.min(vh - p.r, p.y));
-        if (mouseX > -9999) {
-          const dx = p.x - mouseX;
-          const dy = p.y - mouseY;
-          const min = CURSOR_R + p.r;
-          const d2 = dx * dx + dy * dy;
-          if (d2 <= 0.001) {
-            p.x = mouseX + min;
-            p.y = mouseY;
-          } else if (d2 < min * min) {
-            const d = Math.sqrt(d2);
-            p.x = mouseX + (dx / d) * min;
-            p.y = mouseY + (dy / d) * min;
-          }
-        }
-        p.x = Math.max(p.r, Math.min(vw - p.r, p.x));
-        p.y = Math.max(p.r, Math.min(vh - p.r, p.y));
       }
     }
   }
@@ -402,9 +415,19 @@
     const dt = Math.min((now - lastNow) / 1000, 0.05);
     lastNow = now;
     physics(now, dt);
+    if (mouseX > -9999) {
+      for (let i = pixels.length - 1; i >= 0; i -= 1) {
+        const p = pixels[i];
+        const dx = p.x - mouseX;
+        const dy = p.y - mouseY;
+        const min = CURSOR_R + p.r;
+        if (dx * dx + dy * dy < min * min) popPixel(p);
+      }
+    }
     for (const p of pixels) {
       p.el.style.transform = `translate(${p.x - p.r}px, ${p.y - p.r}px)`;
     }
+    countEl.textContent = pixels.length;
     requestAnimationFrame(frame);
   }
 
