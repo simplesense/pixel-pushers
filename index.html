@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pixel Per Second</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #111;
+    overflow: hidden;
+    font-family: system-ui, sans-serif;
+  }
+  #app {
+    position: relative;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .pixel {
+    position: absolute;
+    left: 0;
+    top: 0;
+    will-change: transform;
+  }
+  #cursor {
+    position: fixed;
+    width: 36px;
+    height: 36px;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 9;
+    transform: translate(-50%, -50%);
+    opacity: 0;
+  }
+  #hud {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.5;
+    background: rgba(0, 0, 0, 0.55);
+    padding: 8px 12px;
+    border-radius: 8px;
+    pointer-events: none;
+    z-index: 10;
+  }
+  #hud .color {
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div>Pixels: <span id="count">0</span></div>
+  <div>Current color: <span id="color" class="color">hsl(0, 100%, 50%)</span></div>
+  <div>Current size: <span id="size">2.0000px</span></div>
+</div>
+<div id="cursor"></div>
+<div id="app"></div>
+<script>
+  const app = document.getElementById('app');
+  const cursorEl = document.getElementById('cursor');
+  const countEl = document.getElementById('count');
+  const colorEl = document.getElementById('color');
+  const sizeEl = document.getElementById('size');
+
+  const PHI = 137.50776405003785;
+  const GOLD = 0.6180339887498949;
+  const CELL = 80;
+  const CURSOR_R = 18;
+  const used = new Set();
+  const usedSizes = new Set();
+  const usedMotion = new Set();
+  const pixels = [];
+  let step = 0;
+  let lastNow = performance.now();
+  let mouseX = -9999;
+  let mouseY = -9999;
+
+  window.addEventListener('mousemove', (e) => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    cursorEl.style.opacity = '1';
+    cursorEl.style.transform = `translate(${mouseX}px, ${mouseY}px)`;
+  });
+
+  window.addEventListener('mouseleave', () => {
+    mouseX = -9999;
+    mouseY = -9999;
+    cursorEl.style.opacity = '0';
+  });
+
+  function frac(n, m) {
+    const v = n * m;
+    return v - Math.floor(v);
+  }
+
+  function nextHsl() {
+    let hue = (step * PHI) % 360;
+    let hsl = `hsl(${hue.toFixed(6)}, 100%, 50%)`;
+    while (used.has(hsl)) {
+      step += 1;
+      hue = (step * PHI) % 360;
+      hsl = `hsl(${hue.toFixed(6)}, 100%, 50%)`;
+    }
+    used.add(hsl);
+    return hsl;
+  }
+
+  function nextSize() {
+    let size = (2 + frac(step, GOLD) * 58).toFixed(4);
+    while (usedSizes.has(size)) {
+      step += 1;
+      size = (2 + frac(step, GOLD) * 58).toFixed(4);
+    }
+    usedSizes.add(size);
+    return size;
+  }
+
+  function nextMotion() {
+    let sig;
+    let params;
+    do {
+      step += 1;
+      const angle = frac(step, 0.1687237) * Math.PI * 2;
+      const speed = 15 + frac(step, 0.3052489) * 135;
+      const freq = 0.2 + frac(step, 0.5127461) * 2.2;
+      const phase = frac(step, 0.7400273) * Math.PI * 2;
+      const amp = 0.2 + frac(step, 0.1945302) * 1.3;
+      const wob = 0.5 + frac(step, 0.8936215) * 1.5;
+      sig = `${angle.toFixed(6)}|${speed.toFixed(4)}|${freq.toFixed(4)}|${phase.toFixed(6)}|${amp.toFixed(4)}|${wob.toFixed(4)}`;
+      params = {
+        basex: Math.cos(angle) * speed,
+        basey: Math.sin(angle) * speed,
+        freq,
+        phase,
+        amp,
+        wob
+      };
+    } while (usedMotion.has(sig));
+    usedMotion.add(sig);
+    return params;
+  }
+
+  function overlapsAny(x, y, r) {
+    for (const p of pixels) {
+      const dx = x - p.x;
+      const dy = y - p.y;
+      const min = r + p.r;
+      if (dx * dx + dy * dy < min * min) return true;
+    }
+    return false;
+  }
+
+  function spawnPosition(r) {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    for (let k = 0; k < 300; k += 1) {
+      const x = r + frac(step + k * 0.37, 0.4174621) * (vw - 2 * r);
+      const y = r + frac(step + k * 0.53, 0.8826187) * (vh - 2 * r);
+      if (mouseX > -9999) {
+        const dx = x - mouseX;
+        const dy = y - mouseY;
+        const min = CURSOR_R + r;
+        if (dx * dx + dy * dy < min * min) continue;
+      }
+      if (!overlapsAny(x, y, r)) return { x, y };
+    }
+    return null;
+  }
+
+  function tick() {
+    for (let i = 0; i < 30; i += 1) {
+      const hsl = nextHsl();
+      const size = parseFloat(nextSize());
+      const motion = nextMotion();
+      const r = size / 2;
+      const pos = spawnPosition(r);
+      if (!pos) {
+        clearInterval(interval);
+        countEl.textContent = pixels.length;
+        return;
+      }
+
+      const div = document.createElement('div');
+      div.className = 'pixel';
+      div.style.background = hsl;
+      div.style.width = `${size}px`;
+      div.style.height = `${size}px`;
+      app.appendChild(div);
+
+      pixels.push({
+        id: step,
+        el: div,
+        r,
+        x: pos.x,
+        y: pos.y,
+        start: performance.now(),
+        repx: 0,
+        repy: 0,
+        ...motion
+      });
+
+      colorEl.textContent = hsl;
+      sizeEl.textContent = `${size}px`;
+    }
+    countEl.textContent = pixels.length;
+  }
+
+  const grid = new Map();
+
+  function probeOccupied(x, y, skip) {
+    const cx = Math.floor(x / CELL);
+    const cy = Math.floor(y / CELL);
+    let scanned = 0;
+    for (let gx = cx - 1; gx <= cx + 1; gx += 1) {
+      for (let gy = cy - 1; gy <= cy + 1; gy += 1) {
+        const bucket = grid.get(gx + ',' + gy);
+        if (!bucket) continue;
+        for (const q of bucket) {
+          if (q === skip) continue;
+          scanned += 1;
+          if (scanned > 96) return true;
+          const dx = x - q.x;
+          const dy = y - q.y;
+          const min = q.r + 2;
+          if (dx * dx + dy * dy < min * min) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function seekEmpty(p, vw, vh) {
+    const PROBES = 8;
+    const probe = 26 + p.r;
+    let free = 0;
+    let sx = 0;
+    let sy = 0;
+    for (let i = 0; i < PROBES; i += 1) {
+      const a = (i / PROBES) * Math.PI * 2;
+      const px = Math.max(1, Math.min(vw - 1, p.x + Math.cos(a) * probe));
+      const py = Math.max(1, Math.min(vh - 1, p.y + Math.sin(a) * probe));
+      if (!probeOccupied(px, py, p)) {
+        free += 1;
+        sx += Math.cos(a);
+        sy += Math.sin(a);
+      }
+    }
+    const len = Math.hypot(sx, sy);
+    const k = ((PROBES - free) / PROBES) ** 2;
+    if (len > 0) {
+      sx = (sx / len) * k;
+      sy = (sy / len) * k;
+    }
+    return { x: sx, y: sy };
+  }
+
+  function physics(now, dt) {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    grid.clear();
+    for (const p of pixels) {
+      const k = (Math.floor(p.x / CELL) + ',' + Math.floor(p.y / CELL));
+      const bucket = grid.get(k);
+      if (bucket) bucket.push(p);
+      else grid.set(k, [p]);
+    }
+    for (const p of pixels) {
+      p.repx = 0;
+      p.repy = 0;
+    }
+    for (const p of pixels) {
+      const cx = Math.floor(p.x / CELL);
+      const cy = Math.floor(p.y / CELL);
+      for (let gx = cx - 2; gx <= cx + 2; gx += 1) {
+        for (let gy = cy - 2; gy <= cy + 2; gy += 1) {
+          const bucket = grid.get(gx + ',' + gy);
+          if (!bucket) continue;
+          for (const q of bucket) {
+            if (q.id <= p.id) continue;
+            const dx = q.x - p.x;
+            const dy = q.y - p.y;
+            const R = (p.r + q.r) * 2.5;
+            const d2 = dx * dx + dy * dy;
+            if (d2 >= R * R) continue;
+            const d = Math.sqrt(d2) || 1e-9;
+            const force = (1 - d / R) * 300;
+            const ax = (dx / d) * force;
+            const ay = (dy / d) * force;
+            p.repx -= ax;
+            p.repy -= ay;
+            q.repx += ax;
+            q.repy += ay;
+          }
+        }
+      }
+    }
+    if (mouseX > -9999) {
+      for (const p of pixels) {
+        const dx = p.x - mouseX;
+        const dy = p.y - mouseY;
+        const R = CURSOR_R + p.r + 90;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= R * R || d2 <= 0.001) continue;
+        const d = Math.sqrt(d2);
+        const force = (1 - d / R) * 700;
+        p.repx += (dx / d) * force;
+        p.repy += (dy / d) * force;
+      }
+    }
+    for (const p of pixels) {
+      const t = (now - p.start) / 1000;
+      const pulse = 1 + p.wob * Math.sin(p.freq * t + p.phase) * p.amp;
+      const seek = seekEmpty(p, vw, vh);
+      let vx = p.basex * pulse + p.repx + seek.x * 140;
+      let vy = p.basey * pulse + p.repy + seek.y * 140;
+      const sp = Math.hypot(vx, vy);
+      if (sp > 240) {
+        vx = (vx / sp) * 240;
+        vy = (vy / sp) * 240;
+      }
+      p.x += vx * dt;
+      p.y += vy * dt;
+      p.x = Math.max(p.r, Math.min(vw - p.r, p.x));
+      p.y = Math.max(p.r, Math.min(vh - p.r, p.y));
+    }
+    for (let iter = 0; iter < 8; iter += 1) {
+      grid.clear();
+      for (const p of pixels) {
+        const k = (Math.floor(p.x / CELL) + ',' + Math.floor(p.y / CELL));
+        const bucket = grid.get(k);
+        if (bucket) bucket.push(p);
+        else grid.set(k, [p]);
+      }
+      for (const p of pixels) {
+        const cx = Math.floor(p.x / CELL);
+        const cy = Math.floor(p.y / CELL);
+        for (let gx = cx - 1; gx <= cx + 1; gx += 1) {
+          for (let gy = cy - 1; gy <= cy + 1; gy += 1) {
+            const bucket = grid.get(gx + ',' + gy);
+            if (!bucket) continue;
+            for (const q of bucket) {
+              if (q.id <= p.id) continue;
+              const dx = q.x - p.x;
+              const dy = q.y - p.y;
+              const min = p.r + q.r;
+              const dsq = dx * dx + dy * dy;
+              if (dsq >= min * min) continue;
+              const dist = Math.sqrt(dsq) || 1e-9;
+              const push = (min - dist) / 2;
+              const nx = dx / dist;
+              const ny = dy / dist;
+              p.x -= nx * push;
+              p.y -= ny * push;
+              q.x += nx * push;
+              q.y += ny * push;
+            }
+          }
+        }
+      }
+      for (const p of pixels) {
+        p.x = Math.max(p.r, Math.min(vw - p.r, p.x));
+        p.y = Math.max(p.r, Math.min(vh - p.r, p.y));
+        if (mouseX > -9999) {
+          const dx = p.x - mouseX;
+          const dy = p.y - mouseY;
+          const min = CURSOR_R + p.r;
+          const d2 = dx * dx + dy * dy;
+          if (d2 <= 0.001) {
+            p.x = mouseX + min;
+            p.y = mouseY;
+          } else if (d2 < min * min) {
+            const d = Math.sqrt(d2);
+            p.x = mouseX + (dx / d) * min;
+            p.y = mouseY + (dy / d) * min;
+          }
+        }
+        p.x = Math.max(p.r, Math.min(vw - p.r, p.x));
+        p.y = Math.max(p.r, Math.min(vh - p.r, p.y));
+      }
+    }
+  }
+
+  function frame(now) {
+    const dt = Math.min((now - lastNow) / 1000, 0.05);
+    lastNow = now;
+    physics(now, dt);
+    for (const p of pixels) {
+      p.el.style.transform = `translate(${p.x - p.r}px, ${p.y - p.r}px)`;
+    }
+    requestAnimationFrame(frame);
+  }
+
+  const interval = setInterval(tick, 1000);
+  tick();
+  requestAnimationFrame(frame);
+</script>
+</body>
+</html>
