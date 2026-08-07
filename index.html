@@ -16,6 +16,7 @@
     position: relative;
     height: 100vh;
     overflow: hidden;
+    touch-action: none;
   }
   .pixel {
     position: absolute;
@@ -25,8 +26,8 @@
   }
   #cursor {
     position: fixed;
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     border: 2px solid #fff;
     border-radius: 50%;
     pointer-events: none;
@@ -80,18 +81,30 @@
   let mouseX = -9999;
   let mouseY = -9999;
 
-  window.addEventListener('mousemove', (e) => {
-    mouseX = e.clientX;
-    mouseY = e.clientY;
+  function showCursor(x, y) {
+    mouseX = x;
+    mouseY = y;
     cursorEl.style.opacity = '1';
-    cursorEl.style.transform = `translate(${mouseX}px, ${mouseY}px)`;
-  });
+    cursorEl.style.transform = `translate(${x}px, ${y}px)`;
+  }
 
-  window.addEventListener('mouseleave', () => {
+  function hideCursor() {
     mouseX = -9999;
     mouseY = -9999;
     cursorEl.style.opacity = '0';
+  }
+
+  window.addEventListener('pointermove', (e) => {
+    showCursor(e.clientX, e.clientY);
   });
+
+  window.addEventListener('pointerdown', (e) => {
+    showCursor(e.clientX, e.clientY);
+  });
+
+  window.addEventListener('pointerup', hideCursor);
+  window.addEventListener('pointercancel', hideCursor);
+  window.addEventListener('mouseleave', hideCursor);
 
   function frac(n, m) {
     const v = n * m;
